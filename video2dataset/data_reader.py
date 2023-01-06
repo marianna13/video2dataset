@@ -15,7 +15,8 @@ def sub_to_dict(sub, dedupe=True, single=False) -> list:
     """Convert WebVTT to JSON, optionally removing duplicate lines"""
 
     captions = webvtt.read_buffer(io.StringIO(sub))
-    dicts = [{"start": c.start, "end": c.end, "lines": c.lines} for c in captions]
+    dicts = [{"start": c.start, "end": c.end, "lines": c.lines}
+             for c in captions]
     if dedupe:
         dicts = []
         prev_line = None
@@ -31,7 +32,8 @@ def sub_to_dict(sub, dedupe=True, single=False) -> list:
                     not_dupe_lines.append(line)
                 prev_line = line
             if not_dupe_lines:
-                dicts.append({"start": c.start, "end": c.end, "lines": not_dupe_lines})
+                dicts.append({"start": c.start, "end": c.end,
+                             "lines": not_dupe_lines})
     if single:
         for d in dicts:
             d["line"] = "\n".join(d.pop("lines"))
@@ -55,7 +57,10 @@ def get_yt_meta(url, yt_metadata_args: dict) -> dict:
 
     """
 
+    yt_meta_dict = dict()
+
     write_subs = yt_metadata_args.get("writesubtitles", None)
+    clip_subtitles = yt_metadata_args.get("clip_subtitles", None)
 
     yt_metadata_args["skip_download"] = True
     yt_metadata_args["ignoreerrors"] = True
@@ -66,12 +71,15 @@ def get_yt_meta(url, yt_metadata_args: dict) -> dict:
     with yt_dlp.YoutubeDL(yt_metadata_args) as yt:
 
         info_dict = yt.extract_info(url, download=False)
+
         if write_subs:
             sub_url = info_dict["requested_subtitles"][yt_metadata_args["subtitleslangs"][0]]["url"]
             res = requests.get(sub_url)
             sub = io.TextIOWrapper(io.BytesIO(res.content)).read()
             sub_dict = sub_to_dict(sub)
-
+            if clip_subtitles:
+                yt_meta_dict["clips"] = [[s["start"], s["end"]]
+                                         for s in sub_dict]
         if yt_metadata_args["get_info"]:
             info_dict.pop("subtitles")
             info_dict.pop("requested_formats")
@@ -81,7 +89,8 @@ def get_yt_meta(url, yt_metadata_args: dict) -> dict:
         else:
             info_dict = None
 
-        yt_meta_dict = {"info": info_dict, "subtitles": sub_dict}
+        yt_meta_dict["info"] = info_dict
+        yt_meta_dict["subtitles"] = sub_dict
 
         return yt_meta_dict
 
@@ -103,7 +112,7 @@ def handle_youtube(youtube_url, tmp_dir, yt_metadata_args, video_height, video_w
     if yt_metadata_args:
         yt_meta_dict = get_yt_meta(youtube_url, yt_metadata_args)
     else:
-        yt_meta_dict = None, None
+        yt_meta_dict = None
     return path, yt_meta_dict, None
 
 
@@ -129,7 +138,8 @@ def handle_url(url, dl_timeout, format_args, tmp_dir, yt_metadata_args=None):
     yt_meta_dict = None
     if "youtube" in url:  # youtube link
         try:
-            file, yt_meta_dict, error_message = handle_youtube(url, tmp_dir, yt_metadata_args, **format_args)
+            file, yt_meta_dict, error_message = handle_youtube(
+                url, tmp_dir, yt_metadata_args, **format_args)
         except Exception as e:  # pylint: disable=(broad-except)
             file, yt_meta_dict, error_message = None, None, str(e)
     # TODO: add .avi, .webm, should also work

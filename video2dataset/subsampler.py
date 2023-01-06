@@ -41,10 +41,12 @@ class ClippingSubsampler:
         s_0, e_f = get_seconds(clips[0][0]), get_seconds(clips[-1][1])
 
         ind = 1
-        _, e_p = clips[0]  # we assume there's always one clip which we want to take
+        # we assume there's always one clip which we want to take
+        _, e_p = clips[0]
         e_p = get_seconds(e_p)
         splits = [e_p]
-        take_inds = [0]  # list of indicies of clips to take, used to discard non-contiguous sections
+        # list of indicies of clips to take, used to discard non-contiguous sections
+        take_inds = [0]
 
         # TODO: make nicer
         for s, e in clips[1:]:
@@ -69,7 +71,8 @@ class ClippingSubsampler:
                 f.write(video_bytes)
             try:
                 _ = (
-                    ffmpeg.input(f"{tmpdir}/input.mp4", ss=s_0, to=e_f)
+                    ffmpeg.input(
+                        filename=f"{tmpdir}/input.mp4", ss=s_0, t=e_f)
                     .output(
                         f"{tmpdir}/clip_%d.mp4",
                         c="copy",
@@ -78,9 +81,10 @@ class ClippingSubsampler:
                         segment_times=segment_times,
                         reset_timestamps=1,
                     )
-                    .run(capture_stdout=True, quiet=True)
+                    .run(capture_stdout=True, quiet=True, capture_stderr=True)
                 )
             except Exception as err:  # pylint: disable=broad-except
+                print(err.stderr)
                 return [], [], str(err)
 
             video_clips = glob.glob(f"{tmpdir}/clip*")
@@ -100,7 +104,8 @@ class ClippingSubsampler:
                     clip_id=clip_id, oom_clip_count=self.oom_clip_count
                 )
                 meta_clip = metadata.copy()
-                meta_clip["clips"] = [clip_span]  # set the timeframe of this clip
+                # set the timeframe of this clip
+                meta_clip["clips"] = [clip_span]
                 meta_clip["key"] = f"{meta_clip['key']}_{clip_key}"
                 metadata_clips.append(meta_clip)
 
