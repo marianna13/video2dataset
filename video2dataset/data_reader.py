@@ -4,11 +4,7 @@ import uuid
 import requests
 import yt_dlp
 import io
-
-try:
-    import webvtt  # pip install webvtt-py
-except ImportError as err:
-    print(err)
+import webvtt
 
 
 def sub_to_dict(sub, dedupe=True, single=False) -> list:
@@ -48,19 +44,14 @@ def get_yt_meta(url, yt_metadata_args: dict) -> dict:
         'subtitleslangs': ['en'],
         'writeautomaticsub': True,
         'get_info': True
-    }
-
+        }
     writesubtitles:    Whether to write subtitles
     writeautomaticsub: Write the automatically generated subtitles to a file
     subtitleslangs:    List of languages of the subtitles to download.
     get_info: whether to add info (title, description, tags etc) to the output.
-
     """
 
-    yt_meta_dict = dict()
-
     write_subs = yt_metadata_args.get("writesubtitles", None)
-    clip_subtitles = yt_metadata_args.get("clip_subtitles", None)
 
     yt_metadata_args["skip_download"] = True
     yt_metadata_args["ignoreerrors"] = True
@@ -71,15 +62,12 @@ def get_yt_meta(url, yt_metadata_args: dict) -> dict:
     with yt_dlp.YoutubeDL(yt_metadata_args) as yt:
 
         info_dict = yt.extract_info(url, download=False)
-
         if write_subs:
             sub_url = info_dict["requested_subtitles"][yt_metadata_args["subtitleslangs"][0]]["url"]
             res = requests.get(sub_url)
             sub = io.TextIOWrapper(io.BytesIO(res.content)).read()
             sub_dict = sub_to_dict(sub)
-            if clip_subtitles:
-                yt_meta_dict["clips"] = [[s["start"], s["end"]]
-                                         for s in sub_dict]
+
         if yt_metadata_args["get_info"]:
             info_dict.pop("subtitles")
             info_dict.pop("requested_formats")
@@ -89,90 +77,84 @@ def get_yt_meta(url, yt_metadata_args: dict) -> dict:
         else:
             info_dict = None
 
-        yt_meta_dict["info"] = info_dict
-        yt_meta_dict["subtitles"] = sub_dict
+        yt_meta_dict = {"info": info_dict, "subtitles": sub_dict}
 
         return yt_meta_dict
 
 
-def handle_youtube(youtube_url, tmp_dir, yt_metadata_args, video_height, video_width):
-    """returns file and destination name from youtube url."""
-    path = f"{tmp_dir}/{str(uuid.uuid4())}.mp4"
-    format_string = (
-        f"bv*[height<={video_height}][width<={video_width}][ext=mp4]"
-        + f"+ba[ext=m4a]/b[height<={video_height}][width<={video_width}]"
-    )
-    ydl_opts = {
-        "outtmpl": path,
-        "format": format_string,
-        "quiet": True,
-    }
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        ydl.download(youtube_url)
-    if yt_metadata_args:
-        yt_meta_dict = get_yt_meta(youtube_url, yt_metadata_args)
-    else:
-        yt_meta_dict = None
-    return path, yt_meta_dict, None
+class Mp4Downloader:
+    """Downloader class for mp4 links"""
+
+    def __init__(self, timeout, tmp_dir):
+        self.timeout = timeout
+        self.tmp_dir = tmp_dir
+
+    def __call__(self, url):
+        resp = requests.get(url, stream=True, timeout=self.timeout)
+        path = f"{self.tmp_dir}/{str(uuid.uuid4())}.mp4"
+        with open(path, "wb") as f:
+            f.write(resp.content)
+        return path, None
 
 
-def handle_mp4_link(mp4_link, tmp_dir, dl_timeout):
-    resp = requests.get(mp4_link, stream=True, timeout=dl_timeout)
-    path = f"{tmp_dir}/{str(uuid.uuid4())}.mp4"
-    with open(path, "wb") as f:
-        f.write(resp.content)
-    return path, None
+class YtDlpDownloader:
+    """Downloader class for yt-dlp links"""
 
+    # TODO: maybe we just include height and width in the metadata_args
+    def __init__(self, tmp_dir, metadata_args, video_size):
+        self.tmp_dir = tmp_dir
+        self.metadata_args = metadata_args
+        self.video_size = video_size
 
-def handle_url(url, dl_timeout, format_args, tmp_dir, yt_metadata_args=None):
-    """
-    Input:
-        url: url of video
+    def __call__(self, url):
+        path = f"{self.tmp_dir}/{str(uuid.uuid4())}.mp4"
 
-    Output:
-        load_file - variable used to load video.
-        file - the file itself (in cases where it needs to be closed after usage).
-        name - fname to save frames to.
-    """
+        # format_string = f"bv*[height<={self.video_size}][ext=mp4]/b[height<={self.video_size}][ext=mp4] / wv/w[ext=mp4]"
+        format_string = f"wv*[height>={self.video_size}][ext=mp4]/w[height>={self.video_size}][ext=mp4] / bv/b[ext=mp4]"
 
-    yt_meta_dict = None
-    if "youtube" in url:  # youtube link
-        try:
-            file, yt_meta_dict, error_message = handle_youtube(
-                url, tmp_dir, yt_metadata_args, **format_args)
-        except Exception as e:  # pylint: disable=(broad-except)
-            file, yt_meta_dict, error_message = None, None, str(e)
-    # TODO: add .avi, .webm, should also work
-    elif url.endswith(".mp4"):  # mp4 link
-        file, error_message = handle_mp4_link(url, tmp_dir, dl_timeout)
-    else:
-        file, error_message = None, "Warning: Incorrect URL type"
-    return file, error_message, yt_meta_dict
+        ydl_opts = {
+            "outtmpl": path,
+            "format": format_string,
+            "quiet": True,
+        }
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download(url)
+        if self.metadata_args:
+            yt_meta_dict = get_yt_meta(url, self.metadata_args)
+        else:
+            yt_meta_dict = None, None
+        return path, yt_meta_dict, None
 
 
 class VideoDataReader:
     """Video data reader provide data for a video"""
 
-    def __init__(self, video_height, video_width, dl_timeout, tmp_dir, yt_meta_args) -> None:
-        self.format_args = {
-            "video_height": video_height,
-            "video_width": video_width,
-        }
-        self.dl_timeout = dl_timeout
-        self.tmp_dir = tmp_dir
-        self.yt_meta_args = yt_meta_args
+    def __init__(self, video_size, dl_timeout, tmp_dir, yt_meta_args) -> None:
+        self.mp4_downloader = Mp4Downloader(dl_timeout, tmp_dir)
+        self.yt_downloader = YtDlpDownloader(tmp_dir, yt_meta_args, video_size)
 
     def __call__(self, row):
         key, url = row
-        file_path, error_message, yt_meta_dict = handle_url(
-            url, self.dl_timeout, self.format_args, self.tmp_dir, self.yt_meta_args
-        )
+
+        yt_meta_dict = None
+        # TODO: make nice function to detect what type of link we're dealing with
+        if "youtube" in url:  # youtube link
+            try:
+                file_path, yt_meta_dict, error_message = self.yt_downloader(
+                    url)
+            except Exception as e:  # pylint: disable=(broad-except)
+                file_path, yt_meta_dict, error_message = None, None, str(e)
+        # TODO: add .avi, .webm, should also work
+        elif url.endswith(".mp4"):  # mp4 link
+            file_path, error_message = self.mp4_downloader(url)
+        else:
+            file_path, error_message = None, "Warning: Unsupported URL type"
+
         if error_message is None:
             with open(file_path, "rb") as vid_file:
                 vid_bytes = vid_file.read()
         else:
             vid_bytes = None
-
         if file_path is not None:  # manually remove tempfile
             os.remove(file_path)
         return key, vid_bytes, yt_meta_dict, error_message

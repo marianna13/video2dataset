@@ -13,7 +13,7 @@ from threading import Semaphore
 from video2dataset.data_reader import VideoDataReader
 from .logger import CappedCounter
 from .logger import write_stats
-from .subsampler import NoOpSubsampler, ClippingSubsampler
+from .subsamplers import ClippingSubsampler, FrameSubsampler, NoOpSubsampler, ResolutionSubsampler
 
 
 def compute_key(key, shard_id, oom_sample_per_shard, oom_shard_count):
@@ -39,8 +39,9 @@ class Worker:
         number_sample_per_shard,
         oom_shard_count,
         encode_format,
-        video_height,
-        video_width,
+        video_size,
+        resize_mode,
+        video_fps,
         tmp_dir,
         yt_metadata_args,
         oom_clip_count=5,
@@ -53,10 +54,16 @@ class Worker:
         self.oom_shard_count = oom_shard_count
         self.encode_format = encode_format
         self.thread_count = thread_count
+
         self.data_reader = VideoDataReader(
-            video_height, video_width, timeout, tmp_dir, yt_metadata_args)
-        self.noop_subsampler = NoOpSubsampler()
+            video_size, timeout, tmp_dir, yt_metadata_args)
+
         self.clipping_subsampler = ClippingSubsampler(oom_clip_count)
+        self.noop_subsampler = NoOpSubsampler()
+        self.resolution_subsampler = ResolutionSubsampler(
+            video_size, resize_mode) if resize_mode is not None else None
+        self.frame_subsampler = FrameSubsampler(
+            video_fps) if video_fps > 0 else None
 
     def __call__(
         self,
@@ -101,6 +108,7 @@ class Worker:
         successes = 0
         failed_to_download = 0
         failed_to_subsample = 0
+        bytes_downloaded = 0
         url_indice = self.column_list.index("url")
         caption_indice = self.column_list.index(
             "caption") if "caption" in self.column_list else None
@@ -145,6 +153,9 @@ class Worker:
                     }
 
                     if error_message is not None:
+                        if "[youtube]" in error_message:  # video-specific error, remove videoID
+                            error_message = "ERROR: [youtube]:" + \
+                                error_message.split(":")[-1]
                         failed_to_download += 1
                         status = "failed_to_download"
                         status_dict.increment(error_message)
@@ -158,15 +169,21 @@ class Worker:
                         semaphore.release()
                         continue
 
-                    if "clips" in self.column_list:
+                    bytes_downloaded += len(vid_stream)
+
+                    if "clips" in self.column_list:  # Clipping
                         subsampled_videos, metas, error_message = self.clipping_subsampler(
                             vid_stream, meta)
-                    elif yt_meta_dict and "clips" in yt_meta_dict.keys():
-                        subsampled_videos, metas, error_message = self.clipping_subsampler(
-                            vid_stream, yt_meta_dict)
                     else:
                         subsampled_videos, metas, error_message = self.noop_subsampler(
                             vid_stream, meta)
+
+                    if self.frame_subsampler is not None:
+                        subsampled_videos, error_message = self.frame_subsampler(
+                            subsampled_videos)
+                    if self.resolution_subsampler is not None:  # Resolution subsampling
+                        subsampled_videos, error_message = self.resolution_subsampler(
+                            subsampled_videos)
 
                     if error_message is not None:
                         failed_to_subsample += 1
@@ -213,6 +230,7 @@ class Worker:
             successes,
             failed_to_download,
             failed_to_subsample,
+            bytes_downloaded,
             start_time,
             end_time,
             status_dict,

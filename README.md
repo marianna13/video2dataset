@@ -61,6 +61,8 @@ It can be used to analyze the results efficiently.
 
 ## Python examples
 
+* [Here's an example PyTorch data loader for reading the output of video2dataset](https://github.com/iejMac/video2dataset/blob/main/examples/data_loader.py)
+
 
 ## API
 
@@ -89,8 +91,12 @@ This module exposes a single function `download` which takes the same arguments 
 * **save_additional_columns** list of additional columns to take from the csv/parquet files and save in metadata files (default *None*)
 * **number_sample_per_shard** the number of sample that will be downloaded in one shard (default *10000*)
 * **timeout** maximum time (in seconds) to wait when trying to download an image (default *10*)
-* **video_height** height of video frames
-* **video_width** width of video frames 
+* **video_size** size of video frames (default *360*)
+* **resize_mode** what resizing transformations to apply to video resolution (default *None*)
+  * **scale** scale video keeping aspect ratios (currently always picks video height)
+  * **crop** center crop to video_size x video_size
+  * **pad** center pad to video_size x video_size
+* **video_fps** what FPS to resample the video to. If < 0 then video FPS remains unchanged (default *-1*)
 * **enable_wandb** whether to enable wandb logging (default *False*)
 * **wandb_project** name of W&B project used (default *video2dataset*)
 * **oom_shard_count** the order of magnitude of the number of shards, used only to decide what zero padding to use to name the shard files (default *5*)
@@ -281,3 +287,6 @@ You can use `make black` to reformat the code
 
 ## Benchmarks
 
+## Special Contributors:
+
+* [ChatGPT](https://chat.openai.com) - FrameSubsampler implementation
