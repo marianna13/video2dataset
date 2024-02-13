@@ -23,6 +23,7 @@ from video2dataset.subsamplers import (
     NoOpSubsampler,
     ResolutionSubsampler,
     AudioRateSubsampler,
+    KeyframeSubsampler
 )
 
 
@@ -88,6 +89,8 @@ class DownloadWorker:
         if "FrameSubsampler" in self.config["subsampling"]:
             video_subsamplers.append(FrameSubsampler(**self.config["subsampling"]["FrameSubsampler"]["args"]))
 
+        if "KeyframeSubsampler" in self.config["subsampling"]:
+             video_subsamplers.append(KeyframeSubsampler(**self.config["subsampling"]["KeyframeSubsampler"]["args"]))
         audio_subsamplers: List[Any] = []
         if "AudioRateSubsampler" in self.config["subsampling"]:
             audio_subsamplers.append(AudioRateSubsampler(**self.config["subsampling"]["AudioRateSubsampler"]["args"]))
@@ -234,7 +237,10 @@ class DownloadWorker:
                     )
                     subsampled_streams, metas, error_message = broadcast_subsampler(streams, meta)
 
+                    print(subsampled_streams.keys())
+
                     for modality in subsampled_streams:
+                        print(modality, self.subsamplers[modality])
                         for modality_subsampler in self.subsamplers[modality]:
                             subsampled_streams, metas, error_message = modality_subsampler(subsampled_streams, metas)
 

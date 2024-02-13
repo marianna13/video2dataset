@@ -128,9 +128,12 @@ class WebDatasetSampleWriter:
     def write(self, streams, key, caption, meta):
         """write sample to tars"""
         sample = {"__key__": key}
+ 
         for modality, stream in streams.items():
+            print(modality)
             ext = self.encode_formats[modality] if modality in self.encode_formats else modality
             sample[ext] = stream
+       
 
         if self.save_caption:
             sample["txt"] = str(caption) if caption is not None else ""
@@ -139,8 +142,17 @@ class WebDatasetSampleWriter:
             if isinstance(v, np.ndarray):
                 meta[k] = v.tolist()
         sample["json"] = json.dumps(meta, indent=4)
-
-        self.tarwriter.write(sample)
+        try:
+            self.tarwriter.write(sample)
+        except Exception as err:
+            for i, jpeg in enumerate(sample["jpeg"]):
+                s = {
+                    "jpeg": jpeg,
+                    "__key__": sample["__key__"]+str(i),
+                    "json": sample["json"]
+                }
+                # s.update(sample)
+                self.tarwriter.write(s)
         self.buffered_parquet_writer.write(meta)
 
     def close(self):
